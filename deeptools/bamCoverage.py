@@ -272,9 +272,11 @@ class OffsetFragment(writeBedGraph.WriteBedGraph):
         if read.is_paired:
             if self.filter_strand == 'forward':
                 if read.flag & 144 == 128 or read.flag & 96 == 64:
+                # if (read.flag & 80 == 80) or (read.flag & 144 == 128): # new
                     return rv
             elif self.filter_strand == 'reverse':
                 if read.flag & 144 == 144 or read.flag & 96 == 96:
+                # if read.flag & 80 == 64) or (read.flag & 144 == 144): # new
                     return rv
             else:
                 return rv

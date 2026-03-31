@@ -26,6 +26,10 @@ def getFractionKept_worker(chrom, start, end, bamFile, args, offset):
     filtered = 0
 
     if end <= start:
+        if getattr(args, "verbose", False):
+            sys.stderr.write(
+                f"[fraction_kept] region={chrom}:{start}-{end} total={tot} filtered={filtered} offset={offset}\n"
+            )
         return (filtered, tot)
 
     prev_pos = set()
@@ -84,10 +88,12 @@ def getFractionKept_worker(chrom, start, end, bamFile, args, offset):
                 if read.is_paired:
                     if args.filterRNAstrand == 'forward':
                         if not ((read.flag & 128 == 128 and read.flag & 16 == 0) or (read.flag & 64 == 64 and read.flag & 32 == 0)):
+                        # if not ((read.flag & 80 == 80) or (read.flag & 144 == 128)): # new 
                             filtered += 1
                             continue
                     elif args.filterRNAstrand == 'reverse':
                         if not (read.flag & 144 == 144 or read.flag & 96 == 96):
+                        # if not ((read.flag & 80 == 64) or (read.flag & 144 == 144)): # new
                             filtered += 1
                             continue
                 else:
@@ -98,6 +104,10 @@ def getFractionKept_worker(chrom, start, end, bamFile, args, offset):
                         filtered += 1
                         continue
 
+    if getattr(args, "verbose", False):
+        sys.stderr.write(
+            f"[fraction_kept] region={chrom}:{start}-{end} total={tot} filtered={filtered} offset={offset}\n"
+        )
     return (filtered, tot)
 
 
@@ -177,7 +187,13 @@ def fraction_kept(args, stats):
         # This should never happen
         total = 1
 
-    return 1.0 - float(filtered) / float(total)
+    fraction_kept_val = 1.0 - float(filtered) / float(total)
+    if getattr(args, "verbose", False):
+        sys.stderr.write(
+            f"[fraction_kept_summary] aggregated filtered={filtered} total={total} "
+            f"fraction_kept={fraction_kept_val}\n"
+        )
+    return fraction_kept_val
 
 
 def get_num_kept_reads(args, stats):
@@ -201,7 +217,9 @@ def get_num_kept_reads(args, stats):
         num_kept_reads = bam_mapped_total - blacklisted
     else:
         num_kept_reads = bam_mapped_total
+    print("num_kept_reads: ", num_kept_reads)
     ftk = fraction_kept(args, stats)
+    print("fraction sampling after filtering: ", ftk)
     if ftk < 1:
         num_kept_reads *= ftk
         print("Due to filtering, {0}% of the aforementioned alignments "
