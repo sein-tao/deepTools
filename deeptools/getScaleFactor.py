@@ -16,12 +16,16 @@ def getFractionKept_wrapper(args):
 
 def getFractionKept_worker(chrom, start, end, bamFile, args, offset):
     """
-    Queries the BAM file and counts the number of alignments kept/found in the
-    first 50000 bases.
+    Queries the BAM file and counts alignments in a genomic interval.
+
+    If *offset* is None, the full [start, end) interval from mapReduce is used
+    (full-genome fraction_kept). Otherwise the legacy sampling window applies:
+    shift by offset * 50000 bp and cap the window to 50 kb.
     """
     bam = bamHandler.openBam(bamFile)
-    start += offset * 50000
-    end = min(end, start + 50000)
+    if offset is not None:
+        start += offset * 50000
+        end = min(end, start + 50000)
     tot = 0
     filtered = 0
 
@@ -87,13 +91,13 @@ def getFractionKept_worker(chrom, start, end, bamFile, args, offset):
             if hasattr(args, "filterRNAstrand"):
                 if read.is_paired:
                     if args.filterRNAstrand == 'forward':
+                        # Alternative (80/144 masks): if not ((read.flag & 80 == 80) or (read.flag & 144 == 128)):
                         if not ((read.flag & 128 == 128 and read.flag & 16 == 0) or (read.flag & 64 == 64 and read.flag & 32 == 0)):
-                        # if not ((read.flag & 80 == 80) or (read.flag & 144 == 128)): # new 
                             filtered += 1
                             continue
                     elif args.filterRNAstrand == 'reverse':
+                        # Alternative (80/144 masks): if not ((read.flag & 80 == 64) or (read.flag & 144 == 144)):
                         if not (read.flag & 144 == 144 or read.flag & 96 == 96):
-                        # if not ((read.flag & 80 == 64) or (read.flag & 144 == 144)): # new
                             filtered += 1
                             continue
                 else:
@@ -105,32 +109,31 @@ def getFractionKept_worker(chrom, start, end, bamFile, args, offset):
                         continue
 
     if getattr(args, "verbose", False):
+        off = "full" if offset is None else str(offset)
         sys.stderr.write(
-            f"[fraction_kept] region={chrom}:{start}-{end} total={tot} filtered={filtered} offset={offset}\n"
+            f"[fraction_kept] region={chrom}:{start}-{end} total={tot} filtered={filtered} offset={off}\n"
         )
     return (filtered, tot)
 
 
 def fraction_kept(args, stats):
     """
-    Count the following:
-    (A) The total number of alignments sampled
-    (B) The total number of alignments ignored due to any of the following:
+    Count the following over **all** alignments in the genome (non-blacklisted
+    regions, respecting --ignoreForNormalization for which chromosomes are
+    scanned):
+
+    (A) The total number of alignments examined
+    (B) The total number of alignments rejected due to:
         --samFlagInclude
         --samFlagExclude
         --minMappingQuality
         --ignoreDuplicates
         --minFragmentLength
         --maxFragmentLength
+        --filterRNAstrand
 
-    Black list regions are already accounted for. This works by sampling the
-    genome (by default, we'll iterate until we sample 1% or 100,000 alignments,
-    whichever is smaller (unless there are fewer than 100,000 alignments, in
-    which case sample everything).
-
-    The sampling works by dividing the genome into bins and only looking at the
-    first 50000 bases. If this doesn't yield sufficient alignments then the bin
-    size is halved.
+    Blacklisted bases are excluded via mapReduce region splitting. Returns
+    1 - filtered/total.
     """
     # Do we even need to proceed?
     if (not args.minMappingQuality or args.minMappingQuality == 0) and \
@@ -146,42 +149,27 @@ def fraction_kept(args, stats):
 
     filtered = 0
     total = 0
-    distanceBetweenBins = 2000000
     bam_handle = bamHandler.openBam(args.bam)
-    bam_mapped = utilities.bam_total_reads(bam_handle, args.ignoreForNormalization, stats)
-    if bam_mapped < 1000000:
-        num_needed_to_sample = bam_mapped
-    else:
-        if 0.1 * bam_mapped >= 1000000:
-            num_needed_to_sample = 0.1 * bam_mapped
-        else:
-            num_needed_to_sample = 1000000
-    if args.exactScaling:
-        num_needed_to_sample = bam_mapped
-    if num_needed_to_sample == bam_mapped:
-        distanceBetweenBins = 55000
     if args.ignoreForNormalization:
         chrom_sizes = [(chrom_name, bam_handle.lengths[idx]) for idx, chrom_name in enumerate(bam_handle.references)
                        if chrom_name not in args.ignoreForNormalization]
     else:
         chrom_sizes = list(zip(bam_handle.references, bam_handle.lengths))
 
-    offset = 0
-    # Iterate over bins at various non-overlapping offsets until we have enough data
-    while total < num_needed_to_sample and offset < np.ceil(distanceBetweenBins / 50000):
-        res = mapReduce.mapReduce((bam_handle.filename, args, offset),
-                                  getFractionKept_wrapper,
-                                  chrom_sizes,
-                                  genomeChunkLength=distanceBetweenBins,
-                                  blackListFileName=args.blackListFileName,
-                                  numberOfProcessors=args.numberOfProcessors,
-                                  verbose=args.verbose)
+    # 5 Mb chunks for mapReduce (plus sub-regions after blacklist)
+    genome_chunk_length = 5_000_000
+    res = mapReduce.mapReduce((bam_handle.filename, args, None),
+                              getFractionKept_wrapper,
+                              chrom_sizes,
+                              genomeChunkLength=genome_chunk_length,
+                              blackListFileName=args.blackListFileName,
+                              numberOfProcessors=args.numberOfProcessors,
+                              verbose=args.verbose)
 
-        if len(res):
-            foo, bar = np.sum(res, axis=0)
-            filtered += foo
-            total += bar
-        offset += 1
+    if len(res):
+        foo, bar = np.sum(res, axis=0)
+        filtered += int(foo)
+        total += int(bar)
 
     if total == 0:
         # This should never happen
