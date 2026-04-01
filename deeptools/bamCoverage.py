@@ -270,13 +270,17 @@ class OffsetFragment(writeBedGraph.WriteBedGraph):
         """
         # Filter by RNA strand, if desired
         if read.is_paired:
+            # 16, 0x10: read is reverse complemented
+            # 32, 0x20: mate is reverse complemented
+            # 64, 0x40: read 1
+            # 128, 0x80: read 2
             if self.filter_strand == 'forward':
-                # Alternative (80/144 masks): if (read.flag & 80 == 80) or (read.flag & 144 == 128):
-                if read.flag & 144 == 128 or read.flag & 96 == 64:
+                # if read.flag & 144 == 128 or read.flag & 96 == 64:
+                if read.flag & 0xB0 == 0xA0 or read.flag & 0x70 == 0x50:
                     return rv
             elif self.filter_strand == 'reverse':
-                # Alternative (80/144 masks): if (read.flag & 80 == 64) or (read.flag & 144 == 144):
-                if read.flag & 144 == 144 or read.flag & 96 == 96:
+                # if read.flag & 144 == 144 or read.flag & 96 == 96:
+                if read.flag & 0xB0 == 0x90 or read.flag & 0x70 == 0x60:
                     return rv
             else:
                 return rv

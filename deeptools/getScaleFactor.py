@@ -91,13 +91,13 @@ def getFractionKept_worker(chrom, start, end, bamFile, args, offset):
             if hasattr(args, "filterRNAstrand"):
                 if read.is_paired:
                     if args.filterRNAstrand == 'forward':
-                        # Alternative (80/144 masks): if not ((read.flag & 80 == 80) or (read.flag & 144 == 128)):
-                        if not ((read.flag & 128 == 128 and read.flag & 16 == 0) or (read.flag & 64 == 64 and read.flag & 32 == 0)):
+                        # if not ((read.flag & 128 == 128 and read.flag & 16 == 0) or (read.flag & 64 == 64 and read.flag & 32 == 0)):
+                        if not (read.flag & 0xB0 == 0xA0 or read.flag & 0x70 == 0x50):
                             filtered += 1
                             continue
                     elif args.filterRNAstrand == 'reverse':
-                        # Alternative (80/144 masks): if not ((read.flag & 80 == 64) or (read.flag & 144 == 144)):
-                        if not (read.flag & 144 == 144 or read.flag & 96 == 96):
+                        # if not (read.flag & 144 == 144 or read.flag & 96 == 96)::
+                        if not (read.flag & 0xB0 == 0x90 or read.flag & 0x70 == 0x60):
                             filtered += 1
                             continue
                 else:
